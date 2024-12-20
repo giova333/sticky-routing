@@ -78,14 +78,6 @@ public class KafkaDataSender {
 
         KafkaProducer<String, String> producer = new KafkaProducer<>(producerProperties);
 
-        var userRegisteredEvents = List.of(
-                new EventPurchase("1", 123),
-                new EventPurchase("2", 15),
-                new EventPurchase("3", 92),
-                new EventPurchase("4", 3218),
-                new EventPurchase("5", 213)
-        );
-
         Faker faker = new Faker();
 
         while (true) {
