@@ -1,0 +1,114 @@
+version: '3.8'
+
+services:
+  kafka-broker:
+    image: apache/kafka-native:latest
+    container_name: kafka-broker
+    networks:
+      - sticky-routing
+    ports:
+      - "9092:9092"
+    healthcheck:
+      test: [ "CMD", "kafka-topics.sh", "--bootstrap-server", "localhost:9092", "--list" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-broker:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-broker:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 24
+  aerospike:
+    image: aerospike/aerospike-server:latest
+    container_name: aerospike
+    networks:
+      - sticky-routing
+    ports:
+      - "3000:3000"
+      - "3001:3001"
+      - "3002:3002"
+      - "3003:3003"
+    environment:
+      - NAMESPACE=user-profile
+    healthcheck:
+      test: [ "CMD", "nc", "-z", "localhost", "3000" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  eureka:
+    image: eureka:latest
+    container_name: eureka
+    build:
+      context: ./eureka
+      dockerfile: Dockerfile
+    networks:
+      - sticky-routing
+    ports:
+      - "8761:8761"
+    healthcheck:
+      test: ["CMD", "sh", "-c", "curl -s http://localhost:8761/actuator/health | grep -q '\"status\":\"UP\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  gateway:
+    image: gateway:latest
+    container_name: gateway
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    networks:
+      - sticky-routing
+    ports:
+      - "8080:8080"
+    environment:
+      - eureka.client.serviceUrl.defaultZone=http://eureka:8761/eureka/
+      - server.port=8080
+    depends_on:
+      - eureka
+  kafka-data-sender:
+    image: kafka-data-sender:latest
+    container_name: kafka-data-sender
+    build:
+      context: ./kafka-data-sender
+      dockerfile: Dockerfile
+    networks:
+      - sticky-routing
+    environment:
+      KAFKA_HOST: kafka-broker:9092
+      DELAY_BETWEEN_SEND: 100
+    depends_on:
+      - kafka-broker
+  user-profile-service:
+    image: user-profile-service:1.0.0
+    build:
+      context: ./user-profile-service
+      dockerfile: Dockerfile
+    networks:
+      - sticky-routing
+    environment:
+      SPRING_APPLICATION_NAME: user-profile-service
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka-broker:9092
+      SPRING_AEROSPIKE_HOSTS: aerospike:3000
+      SPRING_DATA_AEROSPIKE_NAMESPACE: user-profile
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka:8761/eureka/
+    depends_on:
+      - kafka-broker
+      - aerospike
+      - eureka
+      - gateway
+    deploy:
+      replicas: 4
+    ports:
+      - "8090-8093:8080"
+
+networks:
+  sticky-routing:
+    driver: bridge
